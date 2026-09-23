@@ -1,0 +1,10 @@
+# Keep LF in the repository and in working copies: files here run in Linux containers and CI.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.tar binary
+*.gz binary

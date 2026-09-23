@@ -1,0 +1,95 @@
+# Phase 0 sample (task T2). Rules: plan §7, protocol §8.1.
+#
+# Status: CANDIDATES — not yet resolved. In T2, for each entry:
+#   1. confirm the selection criteria (versioned GA tags, public CI config, public release notes);
+#   2. resolve tags to manifest digests for linux/amd64 on one date, and write `resolved_at`;
+#   3. for stratum B/C, list the 4 most recent GA releases (protocol §8.1).
+# After resolution, digests are never re-resolved. Any replacement of a candidate is a deviation.
+
+schema: sample/v1
+resolved_at: null          # ISO 8601 date of T2 resolution
+platform: linux/amd64
+arm64_subset: [debian, envoy, grafana]   # repeated on linux/arm64 for M14 (BTI)
+seed: 20261001
+
+stratum_a_base:            # 6 base images, latest stable
+  - { id: debian,     ref: docker.io/library/debian,                 tag: null, digest: null }
+  - { id: ubuntu,     ref: docker.io/library/ubuntu,                 tag: null, digest: null }
+  - { id: alpine,     ref: docker.io/library/alpine,                 tag: null, digest: null }
+  - { id: ubi,        ref: registry.access.redhat.com/ubi9/ubi-minimal, tag: null, digest: null }
+  - { id: distroless, ref: gcr.io/distroless/base-debian12,          tag: null, digest: null }
+  - { id: wolfi,      ref: cgr.dev/chainguard/wolfi-base,            tag: null, digest: null }
+
+# Strata B and C use the same 10 products. Mix chosen to cover C, C++, Go, JVM,
+# glibc and musl bases, and one very large image.
+stratum_b_products:
+  - id: postgres
+    category: database
+    language: c
+    ref: docker.io/library/postgres
+    ci_repo: https://github.com/docker-library/postgres     # image build repository
+    release_notes: https://www.postgresql.org/docs/release/
+    releases: []           # 4 latest GA: [{ tag, digest }]
+  - id: valkey
+    category: cache
+    language: c
+    ref: docker.io/valkey/valkey
+    ci_repo: https://github.com/valkey-io/valkey-container
+    release_notes: https://github.com/valkey-io/valkey/releases
+    releases: []
+  - id: nginx
+    category: proxy
+    language: c
+    ref: docker.io/library/nginx
+    ci_repo: https://github.com/nginxinc/docker-nginx
+    release_notes: https://nginx.org/en/CHANGES
+    releases: []
+  - id: envoy
+    category: proxy
+    language: cpp
+    ref: docker.io/envoyproxy/envoy
+    ci_repo: https://github.com/envoyproxy/envoy
+    release_notes: https://github.com/envoyproxy/envoy/releases
+    releases: []
+  - id: clickhouse
+    category: database
+    language: cpp
+    ref: docker.io/clickhouse/clickhouse-server
+    ci_repo: https://github.com/ClickHouse/ClickHouse
+    release_notes: https://github.com/ClickHouse/ClickHouse/blob/master/CHANGELOG.md
+    releases: []
+  - id: grafana
+    category: observability
+    language: go
+    ref: docker.io/grafana/grafana
+    ci_repo: https://github.com/grafana/grafana
+    release_notes: https://github.com/grafana/grafana/releases
+    releases: []
+  - id: prometheus
+    category: observability
+    language: go
+    ref: docker.io/prom/prometheus
+    ci_repo: https://github.com/prometheus/prometheus
+    release_notes: https://github.com/prometheus/prometheus/releases
+    releases: []
+  - id: vault
+    category: secrets
+    language: go
+    ref: docker.io/hashicorp/vault
+    ci_repo: https://github.com/hashicorp/vault
+    release_notes: https://github.com/hashicorp/vault/releases
+    releases: []
+  - id: keycloak
+    category: identity
+    language: jvm
+    ref: quay.io/keycloak/keycloak
+    ci_repo: https://github.com/keycloak/keycloak
+    release_notes: https://github.com/keycloak/keycloak/releases
+    releases: []
+  - id: cuda
+    category: ml-runtime (large image)
+    language: c/cpp (prebuilt vendor libraries)
+    ref: nvcr.io/nvidia/cuda
+    ci_repo: https://gitlab.com/nvidia/container-images/cuda
+    release_notes: https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/
+    releases: []           # use one runtime variant consistently, e.g. <ver>-runtime-ubuntu24.04
