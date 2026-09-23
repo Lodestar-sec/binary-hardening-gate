@@ -66,6 +66,9 @@ RUN { \
       echo "crane=$(crane version 2>&1 | head -n1)"; \
     } > /etc/research-toolbox-versions
 
+# Batch tool, not a long-running service: there is nothing to health-check.
+HEALTHCHECK NONE
+
 RUN useradd --create-home --uid 10001 researcher
 USER researcher
 WORKDIR /home/researcher
