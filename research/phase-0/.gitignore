@@ -1,0 +1,4 @@
+# Exported image filesystems and OCI layouts contain third-party binaries: never commit.
+work/
+*.tar
+*.oci/
