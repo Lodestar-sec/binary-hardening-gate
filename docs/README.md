@@ -6,7 +6,7 @@ Technology choices (language, framework, database) are made in **phase 2**, deri
 
 | # | Phase | Document | Gate: complete when | Status |
 |---|---|---|---|---|
-| 0 | Inception | [00-charter.md](00-charter.md) | Problem, users, scope, non-goals, and success metrics are explicit and measurable | ⬜ |
+| 0 | Inception | [00-charter.md](00-charter.md) + [research plan](research/phase-0-plan.md) | Problem, users, scope, non-goals, and success metrics are explicit and measurable | 🟨 |
 | 1 | Requirements | [01-requirements.md](01-requirements.md) | Every requirement has an ID, is testable, and has acceptance criteria; security requirements mapped to OWASP ASVS L2 | ⬜ |
 | 2 | Technology selection | [02-tech-selection.md](02-tech-selection.md) + [ADRs](adr/) | Every choice has an ADR with a weighted evaluation and traces back to requirement IDs | ⬜ |
 | 3 | Architecture | [03-architecture.md](03-architecture.md) | C4 levels 1–3 drawn; every NFR mapped to an architectural mechanism; API contract drafted | ⬜ |
