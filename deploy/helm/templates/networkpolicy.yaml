@@ -1,0 +1,22 @@
+{{- if .Values.networkPolicy.enabled }}
+# Ingress: only pods in the same namespace may reach the HTTP port.
+# Egress rules are added in phase 6, once the service's dependencies are known.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "app.fullname" . }}
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "app.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: http
+          protocol: TCP
+{{- end }}

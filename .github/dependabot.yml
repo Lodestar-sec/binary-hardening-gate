@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keeps SHA-pinned actions current. Add an entry per package ecosystem the repo uses (pip, docker, gomod, terraform…).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+      include: scope

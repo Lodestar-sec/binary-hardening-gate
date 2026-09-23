@@ -1,0 +1,8 @@
+# Default owners for everything in the repository.
+* @Lewall-theart
+
+# Changes to CI, supply-chain config, and security docs always need an owner's review.
+/.github/                 @Lewall-theart
+/deploy/policies/         @Lewall-theart
+/.zap/                    @Lewall-theart
+/docs/05-threat-model.md  @Lewall-theart

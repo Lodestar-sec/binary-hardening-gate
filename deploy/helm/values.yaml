@@ -1,0 +1,56 @@
+# Stack-specific settings (environment, configuration, database connection) are added in phase 6.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/lodestar-sec/CHANGE-ME
+  # When a digest is set it takes precedence over the tag. Releases always pin the digest.
+  digest: ""
+  # Defaults to the chart appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+containerPort: 8080
+
+service:
+  type: ClusterIP
+  port: 8080
+
+probes:
+  # Liveness checks the process only; readiness also checks dependencies (database, etc.).
+  liveness:
+    path: /healthz
+  readiness:
+    path: /readyz
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  privileged: false
+  capabilities:
+    drop: ["ALL"]
+
+networkPolicy:
+  enabled: true
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

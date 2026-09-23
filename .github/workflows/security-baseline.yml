@@ -1,0 +1,56 @@
+name: Security baseline
+
+# Interim baseline until org-security-gates ships its reusable workflow.
+# Scans dependencies, secrets, and IaC misconfigurations; fails on fixable HIGH/CRITICAL findings.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  trivy:
+    name: Trivy (vuln, secret, misconfig)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Scan to SARIF
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+
+      - name: Upload to code scanning
+        # Fork PRs get a read-only token and cannot upload results.
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy
+
+      - name: Gate on fixable HIGH/CRITICAL
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"

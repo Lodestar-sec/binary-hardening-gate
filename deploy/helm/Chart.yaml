@@ -1,0 +1,11 @@
+apiVersion: v2
+# TEMPLATE: rename to the repository name — it becomes the chart's OCI path (oci://ghcr.io/<owner>/charts/<name>).
+name: app
+description: "TEMPLATE - one sentence describing what the service does"
+type: application
+# Chart and app versions are overwritten by the release workflow from the vX.Y.Z tag.
+version: 0.0.0
+appVersion: "0.0.0"
+home: https://github.com/Lodestar-sec
+sources:
+  - https://github.com/Lodestar-sec

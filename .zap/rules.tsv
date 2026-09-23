@@ -1,0 +1,6 @@
+# ZAP baseline rule configuration (tab-separated: rule ID, action, description).
+# Actions: IGNORE, INFO, WARN, FAIL. Rules not listed default to WARN, which is reported but does not fail CI.
+# Promote rules to FAIL as the product matures; every IGNORE needs a justification in the description.
+10021	FAIL	(X-Content-Type-Options Header Missing)
+10062	FAIL	(PII Disclosure)
+90022	FAIL	(Application Error Disclosure)

@@ -1,0 +1,280 @@
+name: Release
+
+# Build once, promote: a release never rebuilds. It takes the image CI already built, signed,
+# and attested on main, proves it in a clean cluster with signature enforcement, and only then
+# publishes the version tag, the signed Helm chart, and the GitHub release.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHART_DIR: deploy/helm
+  NAMESPACE: app
+  KYVERNO_CHART_VERSION: 3.9.1
+
+jobs:
+  prepare:
+    name: Verify image and package chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      attestations: read
+    outputs:
+      image: ${{ steps.resolve.outputs.image }}
+      digest: ${{ steps.resolve.outputs.digest }}
+      version: ${{ steps.resolve.outputs.version }}
+      chart: ${{ steps.resolve.outputs.chart }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve release
+        id: resolve
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          chart="$(yq '.name' "$CHART_DIR/Chart.yaml")"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME does not point to a commit on main. Only commits that passed CI on main can be released."
+            exit 1
+          fi
+          digest="$(docker buildx imagetools inspect "$image:sha-$GITHUB_SHA" --format '{{json .Manifest}}' | jq -r '.digest')"
+          if [[ -z "$digest" || "$digest" == "null" ]]; then
+            echo "::error::Image $image:sha-$GITHUB_SHA not found. Wait for CI on main to publish it, then re-run this workflow."
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "image=$image"
+            echo "digest=$digest"
+            echo "chart=$chart"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Verify signature
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          cosign verify "$IMAGE@$DIGEST" \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/main" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          echo "Signature verified for $IMAGE@$DIGEST"
+
+      - name: Verify provenance and SBOM attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+        run: |
+          gh attestation verify "oci://$IMAGE@$DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml"
+          gh attestation verify "oci://$IMAGE@$DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --predicate-type https://spdx.dev/Document/v2.3
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Package chart pinned to the verified digest
+        env:
+          IMAGE: ${{ steps.resolve.outputs.image }}
+          DIGEST: ${{ steps.resolve.outputs.digest }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          yq -i '.image.repository = strenv(IMAGE) | .image.digest = strenv(DIGEST) | .image.tag = strenv(VERSION)' "$CHART_DIR/values.yaml"
+          helm lint --strict "$CHART_DIR"
+          helm package "$CHART_DIR" --version "$VERSION" --app-version "$VERSION" --destination "$RUNNER_TEMP/chart"
+
+      - name: Upload chart
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: chart
+          path: ${{ runner.temp }}/chart/*.tgz
+          retention-days: 5
+
+  verify:
+    name: Verify in a clean cluster
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      RELEASE: ${{ github.event.repository.name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download chart
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: chart
+          path: ${{ runner.temp }}/chart
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          cluster_name: release
+
+      - name: Install Kyverno
+        run: |
+          helm install kyverno kyverno \
+            --repo https://kyverno.github.io/kyverno/ \
+            --version "$KYVERNO_CHART_VERSION" \
+            --namespace kyverno --create-namespace \
+            --wait --timeout 10m
+
+      - name: Enforce signed images
+        run: |
+          sed -e "s|__IMAGE__|$IMAGE|g" -e "s|__REPOSITORY__|$GITHUB_REPOSITORY|g" \
+            deploy/policies/require-signed-images.yaml | kubectl apply -f -
+          kubectl wait imagevalidatingpolicies.policies.kyverno.io/require-signed-images \
+            --for=jsonpath='{.status.conditionStatus.ready}'=true --timeout=180s
+
+      - name: Install released chart
+        run: |
+          helm install "$RELEASE" "$RUNNER_TEMP"/chart/*.tgz \
+            --namespace "$NAMESPACE" --create-namespace \
+            --wait --timeout 5m
+          helm test "$RELEASE" --namespace "$NAMESPACE" --logs --timeout 3m
+
+      - name: Prove unverifiable images are rejected
+        run: |
+          unsigned="$IMAGE@sha256:$(printf '0%.0s' {1..64})"
+          if kubectl run unsigned-probe -n "$NAMESPACE" --image="$unsigned" --restart=Never 2> "$RUNNER_TEMP/deny.log"; then
+            echo "::error::An unverifiable image was admitted: signature enforcement is not working."
+            exit 1
+          fi
+          if ! grep -q "Policy require-signed-images failed" "$RUNNER_TEMP/deny.log"; then
+            cat "$RUNNER_TEMP/deny.log"
+            echo "::error::The pod was rejected, but not by the signature policy."
+            exit 1
+          fi
+          echo "Unverifiable image rejected by require-signed-images, as expected."
+
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl get imagevalidatingpolicies -o yaml || true
+          kubectl get all -n "$NAMESPACE" -o wide || true
+          kubectl describe pods -n "$NAMESPACE" || true
+          kubectl get events -A --sort-by=.lastTimestamp | tail -50 || true
+
+  publish:
+    name: Publish release
+    needs: [prepare, verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      id-token: write
+    env:
+      IMAGE: ${{ needs.prepare.outputs.image }}
+      DIGEST: ${{ needs.prepare.outputs.digest }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      CHART: ${{ needs.prepare.outputs.chart }}
+    steps:
+      - name: Download chart
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: chart
+          path: ${{ runner.temp }}/chart
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Promote image tag
+        # Adds the version tag to the existing manifest; the digest, signature, and attestations are unchanged.
+        run: docker buildx imagetools create --tag "$IMAGE:$VERSION" "$IMAGE@$DIGEST"
+
+      - name: Push and sign chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          out="$(helm push "$RUNNER_TEMP"/chart/*.tgz "oci://ghcr.io/$owner/charts" 2>&1)"
+          echo "$out"
+          chart_digest="$(awk '/^Digest:/ {print $2}' <<< "$out")"
+          if [[ -z "$chart_digest" ]]; then echo "::error::Could not read the chart digest from helm push."; exit 1; fi
+          cosign sign --yes "ghcr.io/$owner/charts/$CHART@$chart_digest"
+
+      - name: Generate SBOM for release assets
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ needs.prepare.outputs.image }}@${{ needs.prepare.outputs.digest }}
+          registry-username: ${{ github.actor }}
+          registry-password: ${{ secrets.GITHUB_TOKEN }}
+          format: spdx-json
+          output-file: ${{ runner.temp }}/sbom.spdx.json
+          upload-artifact: false
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          ## Artifacts
+
+          - Image: \`$IMAGE:$VERSION\` (\`$DIGEST\`)
+          - Helm chart: \`oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts/$CHART --version $VERSION\`
+
+          ## Verify
+
+          \`\`\`bash
+          cosign verify $IMAGE@$DIGEST \\
+            --certificate-identity https://github.com/$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/main \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          gh attestation verify oci://$IMAGE@$DIGEST --repo $GITHUB_REPOSITORY
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/sbom.spdx.json" "$RUNNER_TEMP"/chart/*.tgz \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --generate-notes \
+            --verify-tag

@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "app.fullname" . }}-test-health
+  labels:
+    {{- include "app.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: readiness
+      # busybox 1.37, pinned by digest.
+      image: busybox@sha256:4f93577242de6585bb7211f687673fc8a715571fdec8cf0901fd0724dc05dea2
+      command:
+        - wget
+        - -q
+        - -O-
+        - "http://{{ include "app.fullname" . }}:{{ .Values.service.port }}{{ .Values.probes.readiness.path }}"
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 32Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        privileged: false
+        capabilities:
+          drop: ["ALL"]
