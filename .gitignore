@@ -9,6 +9,13 @@
 *.tfvars
 !*.tfvars.example
 kubeconfig*
+# SSH keys (keys belong in ~/.ssh, never in a repository)
+id_rsa*
+id_ecdsa*
+id_ed25519*
+*.ppk
+git_org
+git_org.pub
 
 # Scanner output
 *.sarif
